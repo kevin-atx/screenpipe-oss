@@ -60,7 +60,7 @@ mod tests {
         let device_spec = Arc::new(default_output_device().await.unwrap());
         let duration = Duration::from_secs(30); // Record for 3 seconds
         let time = Utc::now().timestamp_millis();
-        let output_path = PathBuf::from(format!("test_output_{}.mp4", time));
+        let output_path = PathBuf::from(format!("test_output_{}.ogg", time));
         let (sender, receiver) = crossbeam::channel::bounded(100);
         let is_running = Arc::new(AtomicBool::new(true));
         let is_running_clone = Arc::clone(&is_running);
@@ -103,8 +103,8 @@ mod tests {
         let kind = infer::get_from_path(&output_path).unwrap().unwrap();
         assert_eq!(
             kind.mime_type(),
-            "audio/mpeg",
-            "File should be in mp3 format"
+            "audio/ogg",
+            "File should be in ogg format"
         );
 
         // Clean up
@@ -120,7 +120,7 @@ mod tests {
         let device_spec = Arc::new(default_output_device().await.unwrap());
         let duration = Duration::from_secs(30);
         let time = Utc::now().timestamp_millis();
-        let output_path = PathBuf::from(format!("test_output_interrupt_{}.mp4", time));
+        let output_path = PathBuf::from(format!("test_output_interrupt_{}.ogg", time));
         let (sender, receiver) = crossbeam::channel::bounded(100);
         let is_running = Arc::new(AtomicBool::new(true));
         let is_running_clone = Arc::clone(&is_running);
@@ -171,8 +171,8 @@ mod tests {
         let kind = infer::get_from_path(&output_path).unwrap().unwrap();
         assert_eq!(
             kind.mime_type(),
-            "audio/mpeg",
-            "File should be in mp3 format"
+            "audio/ogg",
+            "File should be in ogg format"
         );
 
         // Verify file duration

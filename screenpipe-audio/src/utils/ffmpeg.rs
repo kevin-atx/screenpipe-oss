@@ -30,15 +30,11 @@ fn encode_single_audio(
             "-i",
             "pipe:0",
             "-c:a",
-            "aac",
+            "libopus",
             "-b:a",
-            "64k", // Reduced bitrate for higher compression
-            "-profile:a",
-            "aac_low", // Use AAC-LC profile for better compatibility
-            "-movflags",
-            "+faststart", // Optimize for web streaming
+            "24k",
             "-f",
-            "mp4",
+            "ogg",
             output_path.to_str().unwrap(),
         ])
         .stdin(Stdio::piped())
@@ -82,7 +78,7 @@ pub fn get_new_file_path(device: &str, output_path: &PathBuf) -> String {
     let new_file_name = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let sanitized_device_name = device.replace(['/', '\\'], "_");
     PathBuf::from(output_path)
-        .join(format!("{}_{}.mp4", sanitized_device_name, new_file_name))
+        .join(format!("{}_{}.ogg", sanitized_device_name, new_file_name))
         .to_str()
         .expect("Failed to create valid path")
         .to_string()
