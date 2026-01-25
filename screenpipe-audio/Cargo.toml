@@ -62,6 +62,9 @@ screenpipe-core = { path = "../screenpipe-core" }
 screenpipe-events = { path = "../screenpipe-events" }
 screenpipe-db = { path = "../screenpipe-db" }
 
+# Pro audio processing (optional - replaces OSS VAD/transcription)
+audiopipe = { path = "../../screenpipe-pro/audiopipe", optional = true }
+
 # crossbeam
 crossbeam = { workspace = true }
 dashmap = { workspace = true }
@@ -107,6 +110,8 @@ tracing-subscriber = "0.3.16"
 [features]
 metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
+# Use audiopipe for audio processing (replaces OSS VAD/transcription)
+pro-audio = ["audiopipe", "audiopipe/metal"]
 
 [[example]]
 name = "screenpipe-audio"

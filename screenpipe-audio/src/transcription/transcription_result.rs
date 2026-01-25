@@ -59,9 +59,15 @@ pub async fn process_transcription_result(
         return Ok(None);
     }
 
-    let speaker = get_or_create_speaker_from_embedding(db, &result.speaker_embedding).await?;
-
-    info!("Detected speaker: {:?}", speaker);
+    // Handle empty speaker embeddings (e.g., from audiopipe when no speaker detected)
+    let speaker_id = if result.speaker_embedding.is_empty() {
+        info!("No speaker embedding available, skipping speaker assignment");
+        None
+    } else {
+        let speaker = get_or_create_speaker_from_embedding(db, &result.speaker_embedding).await?;
+        info!("Detected speaker: {:?}", speaker);
+        Some(speaker.id)
+    };
 
     let transcription = result.transcription.unwrap();
     let transcription_engine = audio_transcription_engine.to_string();
@@ -108,7 +114,7 @@ pub async fn process_transcription_result(
                             }
                         },
                     },
-                    Some(speaker.id),
+                    speaker_id,
                     Some(result.start_time),
                     Some(result.end_time),
                 )

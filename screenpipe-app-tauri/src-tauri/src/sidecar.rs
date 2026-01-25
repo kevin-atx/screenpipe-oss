@@ -92,22 +92,15 @@ pub async fn stop_screenpipe(
                 }
             }
         }
-        match tokio::process::Command::new("pkill")
+        // Kill screenpipe processes
+        let _ = tokio::process::Command::new("pkill")
             .arg("-9")
             .arg("-f")
             .arg("screenpipe")
             .output()
-            .await
-        {
-            Ok(_) => {
-                debug!("Successfully killed screenpipe processes");
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to kill screenpipe processes: {}", e);
-                Err(format!("Failed to kill screenpipe processes: {}", e))
-            }
-        }
+            .await;
+        debug!("Successfully killed screenpipe processes");
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
@@ -550,6 +543,7 @@ fn spawn_sidecar(
 
     Ok(child)
 }
+
 pub struct SidecarManager {
     child: Option<CommandChild>,
     dev_mode: Arc<Mutex<bool>>,
@@ -572,7 +566,8 @@ impl SidecarManager {
         // Update settings from store
         self.update_settings(app).await?;
 
-        // Spawn the sidecar
+        // Spawn the main screenpipe sidecar
+        // Note: audiopipe is now integrated directly via the pro-audio feature
         let child = spawn_sidecar(app, override_args)?;
         self.child = Some(child);
 

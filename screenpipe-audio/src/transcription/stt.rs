@@ -20,10 +20,39 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::{error, info};
 use whisper_rs::WhisperContext;
 
 use crate::{AudioInput, TranscriptionResult};
+
+// Audiopipe imports (when pro-audio feature is enabled)
+#[cfg(feature = "pro-audio")]
+use audiopipe::{
+    AudioChunkInput, ChunkProcessingInput, ChunkProcessor, DeviceType as AudiopipeDeviceType,
+    PipelineConfig,
+};
+#[cfg(feature = "pro-audio")]
+use chrono::Utc;
+#[cfg(feature = "pro-audio")]
+use tokio::sync::OnceCell;
+
+/// Global audiopipe processor (initialized once, reused for all chunks)
+#[cfg(feature = "pro-audio")]
+static AUDIOPIPE_PROCESSOR: OnceCell<ChunkProcessor> = OnceCell::const_new();
+
+/// Get or initialize the audiopipe processor
+#[cfg(feature = "pro-audio")]
+async fn get_audiopipe_processor() -> Result<&'static ChunkProcessor> {
+    AUDIOPIPE_PROCESSOR
+        .get_or_try_init(|| async {
+            info!("Initializing audiopipe ChunkProcessor...");
+            let config = PipelineConfig::default();
+            let processor = ChunkProcessor::new(config).await?;
+            info!("Audiopipe ChunkProcessor initialized successfully");
+            Ok(processor)
+        })
+        .await
+}
 
 pub const SAMPLE_RATE: u32 = 16000;
 
@@ -249,4 +278,170 @@ pub async fn run_stt(
             })
         }
     }
+}
+
+// ============================================================================
+// AUDIOPIPE PROCESSING (Pro feature - replaces OSS VAD/transcription)
+// ============================================================================
+
+/// Process audio using audiopipe (Pro audio processing)
+///
+/// This bypasses the OSS VAD (which has issues with speech_frames: 0) and uses
+/// audiopipe's Pyannote-based VAD, quality assessment, and Whisper transcription.
+///
+/// Key differences from OSS processing:
+/// - Always saves audio to file (no VAD gating)
+/// - Uses Pyannote for VAD (more accurate than Silero)
+/// - Includes quality assessment and preprocessing
+/// - Better speaker diarization
+#[cfg(feature = "pro-audio")]
+#[allow(clippy::too_many_arguments)]
+pub async fn process_audio_input_with_audiopipe(
+    audio: AudioInput,
+    output_path: &PathBuf,
+    output_sender: &crossbeam::channel::Sender<TranscriptionResult>,
+) -> Result<()> {
+    use crate::core::device::DeviceType;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs();
+
+    // Resample to 16kHz if needed
+    let audio_data = if audio.sample_rate != SAMPLE_RATE {
+        resample(audio.data.as_ref(), audio.sample_rate, SAMPLE_RATE)?
+    } else {
+        audio.data.as_ref().to_vec()
+    };
+
+    let audio = AudioInput {
+        data: Arc::new(audio_data.clone()),
+        sample_rate: SAMPLE_RATE,
+        ..audio
+    };
+
+    // ALWAYS save audio to file (bypass VAD gate - this was the OSS bug)
+    let new_file_path = get_new_file_path(&audio.device.to_string(), output_path);
+    info!(
+        "Audiopipe: saving audio to file (bypassing VAD): {}",
+        new_file_path
+    );
+
+    if let Err(e) = write_audio_to_file(
+        &audio.data.to_vec(),
+        audio.sample_rate,
+        &PathBuf::from(&new_file_path),
+        false,
+    ) {
+        error!("Error writing audio to file: {:?}", e);
+        return Err(e.into());
+    }
+
+    // Get or initialize audiopipe processor
+    let processor = match get_audiopipe_processor().await {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Failed to initialize audiopipe processor: {:?}", e);
+            return Err(e);
+        }
+    };
+
+    // Map device type
+    let device_type = match audio.device.device_type {
+        DeviceType::Input => AudiopipeDeviceType::Input,
+        DeviceType::Output => AudiopipeDeviceType::Output,
+    };
+
+    // Create audiopipe input
+    let chunk_input = AudioChunkInput {
+        chunk_path: PathBuf::from(&new_file_path),
+        device_name: audio.device.to_string(),
+        device_type,
+        timestamp: Utc::now(),
+        duration_ms: 30000, // 30 second chunks
+    };
+
+    let processing_input = ChunkProcessingInput {
+        chunk: chunk_input,
+        echo_reference: None, // TODO: implement echo cancellation
+        known_speakers: vec![],
+    };
+
+    // Process with audiopipe
+    info!("Audiopipe: processing audio chunk from {}", audio.device);
+    let output = match processor.process(processing_input).await {
+        Ok(output) => output,
+        Err(e) => {
+            error!("Audiopipe processing failed: {:?}", e);
+            // Send error result
+            let _ = output_sender.send(TranscriptionResult {
+                input: audio.clone(),
+                transcription: None,
+                path: new_file_path,
+                timestamp,
+                error: Some(format!("Audiopipe error: {}", e)),
+                speaker_embedding: Vec::new(),
+                start_time: 0.0,
+                end_time: 30.0,
+            });
+            return Err(e.into());
+        }
+    };
+
+    // Map audiopipe output to TranscriptionResult(s)
+    // Audiopipe may produce multiple segments with different speakers
+    let transcription_text = &output.transcription.primary_text;
+
+    if transcription_text.is_empty() {
+        info!(
+            "Audiopipe: no transcription for {} (VAD detected no speech)",
+            audio.device
+        );
+        return Ok(());
+    }
+
+    info!(
+        "Audiopipe: transcribed {} chars from {} ({} speakers detected)",
+        transcription_text.len(),
+        audio.device,
+        output.speakers.len()
+    );
+
+    // For now, send a single TranscriptionResult with the full transcription
+    // TODO: split by speaker segments for better speaker attribution
+    let result = TranscriptionResult {
+        input: audio.clone(),
+        transcription: Some(transcription_text.clone()),
+        path: new_file_path,
+        timestamp,
+        error: None,
+        // Use first speaker's embedding if available
+        speaker_embedding: output
+            .speakers
+            .first()
+            .and_then(|s| s.new_embeddings.first())
+            .map(|e| e.embedding.clone())
+            .unwrap_or_default(),
+        start_time: 0.0,
+        end_time: output.duration_ms as f64 / 1000.0,
+    };
+
+    if output_sender.send(result).is_err() {
+        error!("Failed to send transcription result");
+    }
+
+    Ok(())
+}
+
+/// Fallback when pro-audio feature is not enabled
+#[cfg(not(feature = "pro-audio"))]
+pub async fn process_audio_input_with_audiopipe(
+    _audio: AudioInput,
+    _output_path: &PathBuf,
+    _output_sender: &crossbeam::channel::Sender<TranscriptionResult>,
+) -> Result<()> {
+    Err(anyhow::anyhow!(
+        "Audiopipe processing requires the 'pro-audio' feature to be enabled"
+    ))
 }

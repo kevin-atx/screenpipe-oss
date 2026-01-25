@@ -26,7 +26,7 @@ use crate::{
     transcription::{
         deepgram::streaming::stream_transcription_deepgram,
         handle_new_transcript,
-        stt::process_audio_input,
+        stt::{process_audio_input, process_audio_input_with_audiopipe},
         whisper::model::{create_whisper_context_parameters, download_whisper_model},
     },
     vad::{silero::SileroVad, webrtc::WebRtcVad, VadEngine, VadEngineEnum},
@@ -301,47 +301,73 @@ impl AudioManager {
 
     async fn start_audio_receiver_handler(&self) -> Result<JoinHandle<()>> {
         let transcription_sender = self.transcription_sender.clone();
-        let segmentation_manager = self.segmentation_manager.clone();
-        let segmentation_model_path = segmentation_manager.segmentation_model_path.clone();
-        let embedding_manager = segmentation_manager.embedding_manager.clone();
-        let embedding_extractor = segmentation_manager.embedding_extractor.clone();
         let options = self.options.read().await;
         let output_path = options.output_path.clone();
-        let languages = options.languages.clone();
-        let deepgram_api_key = options.deepgram_api_key.clone();
-        let audio_transcription_engine = options.transcription_engine.clone();
-        let vad_engine = self.vad_engine.clone();
         let whisper_receiver = self.recording_receiver.clone();
-        let context_param = create_whisper_context_parameters(audio_transcription_engine.clone())?;
 
-        let quantized_path = self.stt_model_path.clone();
-        let whisper_context = Arc::new(
-            WhisperContext::new_with_params(&quantized_path.to_string_lossy(), context_param)
-                .expect("failed to load model"),
-        );
-
-        Ok(tokio::spawn(async move {
-            while let Ok(audio) = whisper_receiver.recv() {
-                info!("Received audio from device: {:?}", audio.device.name);
-                if let Err(e) = process_audio_input(
-                    audio.clone(),
-                    vad_engine.clone(),
-                    segmentation_model_path.clone(),
-                    embedding_manager.clone(),
-                    embedding_extractor.clone(),
-                    &output_path.clone().unwrap(),
-                    audio_transcription_engine.clone(),
-                    deepgram_api_key.clone(),
-                    languages.clone(),
-                    &transcription_sender.clone(),
-                    whisper_context.clone(),
-                )
-                .await
-                {
-                    error!("Error processing audio: {:?}", e);
+        // Check if audiopipe (pro-audio) feature is enabled
+        #[cfg(feature = "pro-audio")]
+        {
+            info!("Using audiopipe for audio processing (pro-audio feature enabled)");
+            Ok(tokio::spawn(async move {
+                while let Ok(audio) = whisper_receiver.recv() {
+                    info!("Received audio from device: {:?}", audio.device.name);
+                    if let Err(e) = process_audio_input_with_audiopipe(
+                        audio.clone(),
+                        &output_path.clone().unwrap(),
+                        &transcription_sender.clone(),
+                    )
+                    .await
+                    {
+                        error!("Error processing audio with audiopipe: {:?}", e);
+                    }
                 }
-            }
-        }))
+            }))
+        }
+
+        // Fallback to OSS audio processing
+        #[cfg(not(feature = "pro-audio"))]
+        {
+            let segmentation_manager = self.segmentation_manager.clone();
+            let segmentation_model_path = segmentation_manager.segmentation_model_path.clone();
+            let embedding_manager = segmentation_manager.embedding_manager.clone();
+            let embedding_extractor = segmentation_manager.embedding_extractor.clone();
+            let languages = options.languages.clone();
+            let deepgram_api_key = options.deepgram_api_key.clone();
+            let audio_transcription_engine = options.transcription_engine.clone();
+            let vad_engine = self.vad_engine.clone();
+            let context_param =
+                create_whisper_context_parameters(audio_transcription_engine.clone())?;
+
+            let quantized_path = self.stt_model_path.clone();
+            let whisper_context = Arc::new(
+                WhisperContext::new_with_params(&quantized_path.to_string_lossy(), context_param)
+                    .expect("failed to load model"),
+            );
+
+            Ok(tokio::spawn(async move {
+                while let Ok(audio) = whisper_receiver.recv() {
+                    info!("Received audio from device: {:?}", audio.device.name);
+                    if let Err(e) = process_audio_input(
+                        audio.clone(),
+                        vad_engine.clone(),
+                        segmentation_model_path.clone(),
+                        embedding_manager.clone(),
+                        embedding_extractor.clone(),
+                        &output_path.clone().unwrap(),
+                        audio_transcription_engine.clone(),
+                        deepgram_api_key.clone(),
+                        languages.clone(),
+                        &transcription_sender.clone(),
+                        whisper_context.clone(),
+                    )
+                    .await
+                    {
+                        error!("Error processing audio: {:?}", e);
+                    }
+                }
+            }))
+        }
     }
 
     async fn start_transcription_receiver_handler(&self) -> Result<JoinHandle<()>> {
