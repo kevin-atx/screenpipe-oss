@@ -17,6 +17,8 @@ pub struct TranscriptionResult {
     pub error: Option<String>,
     pub start_time: f64,
     pub end_time: f64,
+    /// Pre-matched speaker ID from audiopipe (bypasses OSS speaker matching)
+    pub speaker_id: Option<i64>,
 }
 
 impl TranscriptionResult {
@@ -59,13 +61,16 @@ pub async fn process_transcription_result(
         return Ok(None);
     }
 
-    // Handle empty speaker embeddings (e.g., from audiopipe when no speaker detected)
-    let speaker_id = if result.speaker_embedding.is_empty() {
+    // Use pre-matched speaker_id from audiopipe if available, otherwise fall back to OSS matching
+    let speaker_id = if let Some(id) = result.speaker_id {
+        info!("Using pre-matched speaker ID from audiopipe: {}", id);
+        Some(id)
+    } else if result.speaker_embedding.is_empty() {
         info!("No speaker embedding available, skipping speaker assignment");
         None
     } else {
         let speaker = get_or_create_speaker_from_embedding(db, &result.speaker_embedding).await?;
-        info!("Detected speaker: {:?}", speaker);
+        info!("Detected speaker via OSS matching: {:?}", speaker);
         Some(speaker.id)
     };
 

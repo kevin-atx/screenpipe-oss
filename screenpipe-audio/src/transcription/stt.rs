@@ -28,8 +28,8 @@ use crate::{AudioInput, TranscriptionResult};
 // Audiopipe imports (when pro-audio feature is enabled)
 #[cfg(feature = "pro-audio")]
 use audiopipe::{
-    AudioChunkInput, ChunkProcessingInput, ChunkProcessor, DeviceType as AudiopipeDeviceType,
-    PipelineConfig,
+    AudioChunkInput, AudiopipeConfig, ChunkProcessingInput, ChunkProcessor,
+    DeviceType as AudiopipeDeviceType,
 };
 #[cfg(feature = "pro-audio")]
 use chrono::Utc;
@@ -46,7 +46,7 @@ async fn get_audiopipe_processor() -> Result<&'static ChunkProcessor> {
     AUDIOPIPE_PROCESSOR
         .get_or_try_init(|| async {
             info!("Initializing audiopipe ChunkProcessor...");
-            let config = PipelineConfig::default();
+            let config = AudiopipeConfig::default();
             let processor = ChunkProcessor::new(config).await?;
             info!("Audiopipe ChunkProcessor initialized successfully");
             Ok(processor)
@@ -258,6 +258,7 @@ pub async fn run_stt(
             speaker_embedding: segment.embedding.clone(),
             start_time: segment.start,
             end_time: segment.end,
+            speaker_id: None, // OSS path - will be matched via embedding
         }),
         Err(e) => {
             error!("STT error for input {}: {:?}", device, e);
@@ -275,6 +276,7 @@ pub async fn run_stt(
                 speaker_embedding: Vec::new(),
                 start_time: segment.start,
                 end_time: segment.end,
+                speaker_id: None,
             })
         }
     }
@@ -364,7 +366,6 @@ pub async fn process_audio_input_with_audiopipe(
 
     let processing_input = ChunkProcessingInput {
         chunk: chunk_input,
-        echo_reference: None, // TODO: implement echo cancellation
         known_speakers: vec![],
     };
 
@@ -384,6 +385,7 @@ pub async fn process_audio_input_with_audiopipe(
                 speaker_embedding: Vec::new(),
                 start_time: 0.0,
                 end_time: 30.0,
+                speaker_id: None,
             });
             return Err(e.into());
         }
@@ -408,6 +410,41 @@ pub async fn process_audio_input_with_audiopipe(
         output.speakers.len()
     );
 
+    // Find the first speaker with a valid database ID (numeric string like "289")
+    // Skip speakers with session-local IDs like "speaker_001" or "unknown"
+    let matched_speaker = output
+        .speakers
+        .iter()
+        .find(|s| s.speaker_id.parse::<i64>().is_ok());
+
+    let (audiopipe_speaker_id, speaker_embedding) = if let Some(speaker) = matched_speaker {
+        let id = speaker.speaker_id.parse::<i64>().ok();
+        let embedding = speaker
+            .new_embeddings
+            .first()
+            .map(|e| e.embedding.clone())
+            .unwrap_or_default();
+        info!(
+            "Audiopipe: using matched speaker ID {} for {} (confidence: {:?})",
+            speaker.speaker_id, audio.device, speaker.match_confidence
+        );
+        (id, embedding)
+    } else {
+        // No cross-session match found - log all speaker IDs for debugging
+        let speaker_ids: Vec<&str> = output.speakers.iter().map(|s| s.speaker_id.as_str()).collect();
+        info!(
+            "Audiopipe: no cross-session match for {} (session speakers: {:?})",
+            audio.device, speaker_ids
+        );
+        let embedding = output
+            .speakers
+            .first()
+            .and_then(|s| s.new_embeddings.first())
+            .map(|e| e.embedding.clone())
+            .unwrap_or_default();
+        (None, embedding)
+    };
+
     // For now, send a single TranscriptionResult with the full transcription
     // TODO: split by speaker segments for better speaker attribution
     let result = TranscriptionResult {
@@ -416,15 +453,11 @@ pub async fn process_audio_input_with_audiopipe(
         path: new_file_path,
         timestamp,
         error: None,
-        // Use first speaker's embedding if available
-        speaker_embedding: output
-            .speakers
-            .first()
-            .and_then(|s| s.new_embeddings.first())
-            .map(|e| e.embedding.clone())
-            .unwrap_or_default(),
+        speaker_embedding,
         start_time: 0.0,
         end_time: output.duration_ms as f64 / 1000.0,
+        // Use audiopipe's matched speaker_id directly (bypasses OSS re-matching)
+        speaker_id: audiopipe_speaker_id,
     };
 
     if output_sender.send(result).is_err() {
