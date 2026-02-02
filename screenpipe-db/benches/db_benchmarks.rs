@@ -44,6 +44,7 @@ async fn setup_large_db(size: usize) -> DatabaseManager {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();

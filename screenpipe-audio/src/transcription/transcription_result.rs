@@ -19,6 +19,8 @@ pub struct TranscriptionResult {
     pub end_time: f64,
     /// Pre-matched speaker ID from audiopipe (bypasses OSS speaker matching)
     pub speaker_id: Option<i64>,
+    /// Pipeline metadata JSON (quality, hallucination scores, confidence, etc.) from audiopipe
+    pub pipeline_metadata: Option<String>,
 }
 
 impl TranscriptionResult {
@@ -76,6 +78,7 @@ pub async fn process_transcription_result(
 
     let transcription = result.transcription.unwrap();
     let transcription_engine = audio_transcription_engine.to_string();
+    let pipeline_metadata = result.pipeline_metadata;
     let mut chunk_id: Option<i64> = None;
 
     info!(
@@ -122,6 +125,7 @@ pub async fn process_transcription_result(
                     speaker_id,
                     Some(result.start_time),
                     Some(result.end_time),
+                    pipeline_metadata.as_deref(),
                 )
                 .await
             {

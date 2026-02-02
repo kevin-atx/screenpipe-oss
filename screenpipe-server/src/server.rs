@@ -1479,6 +1479,7 @@ async fn add_transcription_to_db(
         None,
         None,
         None,
+        None, // No pipeline metadata (external API)
     )
     .await?;
 

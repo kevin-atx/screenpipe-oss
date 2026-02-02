@@ -402,6 +402,7 @@ async fn insert_test_data(db: &Arc<DatabaseManager>) {
         None,
         None,
         None,
+            None,
     )
     .await
     .unwrap();

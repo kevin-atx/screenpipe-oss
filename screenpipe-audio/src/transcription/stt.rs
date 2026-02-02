@@ -34,6 +34,8 @@ use audiopipe::{
 #[cfg(feature = "pro-audio")]
 use chrono::Utc;
 #[cfg(feature = "pro-audio")]
+use serde_json;
+#[cfg(feature = "pro-audio")]
 use tokio::sync::OnceCell;
 
 /// Global audiopipe processor (initialized once, reused for all chunks)
@@ -46,7 +48,29 @@ async fn get_audiopipe_processor() -> Result<&'static ChunkProcessor> {
     AUDIOPIPE_PROCESSOR
         .get_or_try_init(|| async {
             info!("Initializing audiopipe ChunkProcessor...");
-            let config = AudiopipeConfig::default();
+
+            // Try loading config from ~/.screenpipe/audiopipe.toml, fall back to default
+            let config = {
+                let config_path = dirs::home_dir()
+                    .map(|h| h.join(".screenpipe").join("audiopipe.toml"))
+                    .filter(|p| p.exists());
+
+                if let Some(path) = config_path {
+                    match AudiopipeConfig::from_file(&path) {
+                        Ok(cfg) => {
+                            info!("Loaded audiopipe config from {:?}", path);
+                            cfg
+                        }
+                        Err(e) => {
+                            error!("Failed to load audiopipe config from {:?}: {}, using defaults", path, e);
+                            AudiopipeConfig::default()
+                        }
+                    }
+                } else {
+                    AudiopipeConfig::default()
+                }
+            };
+
             let processor = ChunkProcessor::new(config).await?;
             info!("Audiopipe ChunkProcessor initialized successfully");
             Ok(processor)
@@ -259,6 +283,7 @@ pub async fn run_stt(
             start_time: segment.start,
             end_time: segment.end,
             speaker_id: None, // OSS path - will be matched via embedding
+            pipeline_metadata: None, // OSS path - no pipeline metadata
         }),
         Err(e) => {
             error!("STT error for input {}: {:?}", device, e);
@@ -277,6 +302,7 @@ pub async fn run_stt(
                 start_time: segment.start,
                 end_time: segment.end,
                 speaker_id: None,
+                pipeline_metadata: None,
             })
         }
     }
@@ -386,6 +412,7 @@ pub async fn process_audio_input_with_audiopipe(
                 start_time: 0.0,
                 end_time: 30.0,
                 speaker_id: None,
+                pipeline_metadata: None,
             });
             return Err(e.into());
         }
@@ -445,6 +472,49 @@ pub async fn process_audio_input_with_audiopipe(
         (None, embedding)
     };
 
+    // Build pipeline metadata JSON for database storage
+    // This captures quality, hallucination scores, and confidence for posthumous analysis
+    let pipeline_metadata = {
+        let metadata = serde_json::json!({
+            "quality": {
+                "score": output.quality.score,
+                "snr_db": output.quality.snr_db,
+                "clipping_ratio": output.quality.clipping_ratio,
+                "volume_dbfs": output.quality.volume_dbfs,
+            },
+            "hallucination": output.hallucination.as_ref().map(|h| serde_json::json!({
+                "is_hallucination": h.is_hallucination,
+                "score": h.score,
+                "adjusted_score": h.adjusted_score,
+                "matched_patterns": h.matched_patterns,
+                "words_per_second": h.words_per_second,
+            })),
+            "transcription": {
+                "outcome_type": output.transcription.outcome_type,
+                "decision_reason": output.transcription.decision_reason,
+                "confidence": {
+                    "raw": output.transcription.confidence.raw,
+                    "calibrated": output.transcription.confidence.calibrated,
+                    "calibration_method": output.transcription.confidence.calibration_method,
+                    "snr_adjusted": output.transcription.confidence.snr_adjusted,
+                }
+            },
+            "validation": output.validation_metrics.as_ref().map(|v| serde_json::json!({
+                "alignment_quality": v.alignment_quality,
+                "orphan_word_ratio": v.orphan_word_ratio,
+                "orphan_word_count": v.orphan_word_count,
+                "word_count": v.word_count,
+                "vad_hallucination_score": v.vad_hallucination_score,
+            })),
+            "vad": {
+                "speech_ratio": output.vad.speech_ratio,
+                "segment_count": output.vad.vad_segments.len(),
+                "speaker_count": output.speakers.len(),
+            },
+        });
+        Some(metadata.to_string())
+    };
+
     // For now, send a single TranscriptionResult with the full transcription
     // TODO: split by speaker segments for better speaker attribution
     let result = TranscriptionResult {
@@ -458,6 +528,7 @@ pub async fn process_audio_input_with_audiopipe(
         end_time: output.duration_ms as f64 / 1000.0,
         // Use audiopipe's matched speaker_id directly (bypasses OSS re-matching)
         speaker_id: audiopipe_speaker_id,
+        pipeline_metadata,
     };
 
     if output_sender.send(result).is_err() {

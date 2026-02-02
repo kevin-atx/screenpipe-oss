@@ -142,13 +142,14 @@ impl DatabaseManager {
         speaker_id: Option<i64>,
         start_time: Option<f64>,
         end_time: Option<f64>,
+        classification_metadata: Option<&str>,
     ) -> Result<i64, sqlx::Error> {
         let text_length = transcription.len() as i64;
         let mut tx = self.pool.begin().await?;
 
         // Insert the full transcription
         let id = sqlx::query(
-            "INSERT INTO audio_transcriptions (audio_chunk_id, transcription, offset_index, timestamp, transcription_engine, device, is_input_device, speaker_id, start_time, end_time, text_length) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO audio_transcriptions (audio_chunk_id, transcription, offset_index, timestamp, transcription_engine, device, is_input_device, speaker_id, start_time, end_time, text_length, classification_metadata) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .bind(audio_chunk_id)
         .bind(transcription)
@@ -161,6 +162,7 @@ impl DatabaseManager {
         .bind(start_time)
         .bind(end_time)
         .bind(text_length)
+        .bind(classification_metadata)
         .execute(&mut *tx)
         .await?
         .last_insert_rowid();

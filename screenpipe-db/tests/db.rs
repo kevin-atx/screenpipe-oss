@@ -93,6 +93,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -159,6 +160,7 @@ mod tests {
                 name: "test".to_string(),
                 device_type: DeviceType::Output,
             },
+            None,
             None,
             None,
             None,
@@ -277,6 +279,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -374,6 +377,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -443,6 +447,7 @@ mod tests {
                 None,
                 None,
                 None,
+            None,
             )
             .await;
         println!("Second audio insert result: {:?}", insert_result);
@@ -629,6 +634,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -664,6 +670,7 @@ mod tests {
                 name: "test".to_string(),
                 device_type: DeviceType::Output,
             },
+            None,
             None,
             None,
             None,
@@ -814,6 +821,7 @@ mod tests {
                     Some(speaker.id),
                     None,
                     None,
+            None,
                 )
                 .await
                 .unwrap();
@@ -881,6 +889,7 @@ mod tests {
                     Some(speaker.id),
                     None,
                     None,
+            None,
                 )
                 .await
                 .unwrap();
@@ -940,6 +949,7 @@ mod tests {
                     Some(speaker.id),
                     None,
                     None,
+            None,
                 )
                 .await
                 .unwrap();
@@ -984,6 +994,7 @@ mod tests {
                 device_type: DeviceType::Output,
             },
             Some(speaker.id),
+            None,
             None,
             None,
         )
@@ -1033,6 +1044,7 @@ mod tests {
             Some(speaker.id),
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -1051,6 +1063,7 @@ mod tests {
                 device_type: DeviceType::Output,
             },
             Some(speaker2.id),
+            None,
             None,
             None,
         )
@@ -1357,6 +1370,7 @@ mod tests {
                 name: "test".to_string(),
                 device_type: DeviceType::Output,
             },
+            None,
             None,
             None,
             None,
