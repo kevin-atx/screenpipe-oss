@@ -15,6 +15,9 @@ use whisper_rs::WhisperContext;
 
 use screenpipe_db::DatabaseManager;
 
+#[cfg(feature = "pro-audio")]
+use crate::transcription::stt::init_audiopipe;
+
 use super::{start_device_monitor, stop_device_monitor, AudioManagerOptions};
 use crate::{
     core::{
@@ -311,6 +314,13 @@ impl AudioManager {
             let db = self.db.clone();
             info!("Using audiopipe for audio processing (pro-audio feature enabled)");
             Ok(tokio::spawn(async move {
+                // Initialize audiopipe proactively (loads models, spawns sidecars)
+                if let Err(e) = init_audiopipe(&db).await {
+                    error!("Failed to initialize audiopipe processor at startup: {:?}", e);
+                    return;
+                }
+                info!("Audiopipe processor ready, listening for audio chunks");
+
                 while let Ok(audio) = whisper_receiver.recv() {
                     info!("Received audio from device: {:?}", audio.device.name);
                     if let Err(e) = process_audio_input_with_audiopipe(

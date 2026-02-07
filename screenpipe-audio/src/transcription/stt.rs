@@ -96,6 +96,14 @@ async fn get_audiopipe_processor(_db: &Arc<DatabaseManager>) -> Result<&'static 
         .await
 }
 
+/// Proactively initialize the audiopipe processor at startup.
+/// Call this before processing audio to avoid cold-start delay on the first chunk.
+#[cfg(feature = "pro-audio")]
+pub async fn init_audiopipe(db: &Arc<DatabaseManager>) -> Result<()> {
+    get_audiopipe_processor(db).await?;
+    Ok(())
+}
+
 pub const SAMPLE_RATE: u32 = 16000;
 
 #[allow(clippy::too_many_arguments)]
