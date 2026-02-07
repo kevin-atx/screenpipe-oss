@@ -308,6 +308,7 @@ impl AudioManager {
         // Check if audiopipe (pro-audio) feature is enabled
         #[cfg(feature = "pro-audio")]
         {
+            let db = self.db.clone();
             info!("Using audiopipe for audio processing (pro-audio feature enabled)");
             Ok(tokio::spawn(async move {
                 while let Ok(audio) = whisper_receiver.recv() {
@@ -316,6 +317,7 @@ impl AudioManager {
                         audio.clone(),
                         &output_path.clone().unwrap(),
                         &transcription_sender.clone(),
+                        db.clone(),
                     )
                     .await
                     {

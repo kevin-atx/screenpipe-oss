@@ -28,11 +28,13 @@ use crate::{AudioInput, TranscriptionResult};
 // Audiopipe imports (when pro-audio feature is enabled)
 #[cfg(feature = "pro-audio")]
 use audiopipe::{
-    AudioChunkInput, AudiopipeConfig, ChunkProcessingInput, ChunkProcessor,
-    DeviceType as AudiopipeDeviceType,
+    storage::ScreenpipeStorage, AudioChunkInput, AudiopipeConfig, ChunkProcessingInput,
+    ChunkProcessor, DeviceType as AudiopipeDeviceType,
 };
 #[cfg(feature = "pro-audio")]
 use chrono::Utc;
+#[cfg(feature = "pro-audio")]
+use screenpipe_db::DatabaseManager;
 #[cfg(feature = "pro-audio")]
 use serde_json;
 #[cfg(feature = "pro-audio")]
@@ -43,8 +45,9 @@ use tokio::sync::OnceCell;
 static AUDIOPIPE_PROCESSOR: OnceCell<ChunkProcessor> = OnceCell::const_new();
 
 /// Get or initialize the audiopipe processor
+/// The `db` parameter is only used on the first call (OnceCell init).
 #[cfg(feature = "pro-audio")]
-async fn get_audiopipe_processor() -> Result<&'static ChunkProcessor> {
+async fn get_audiopipe_processor(_db: &Arc<DatabaseManager>) -> Result<&'static ChunkProcessor> {
     AUDIOPIPE_PROCESSOR
         .get_or_try_init(|| async {
             info!("Initializing audiopipe ChunkProcessor...");
@@ -71,8 +74,23 @@ async fn get_audiopipe_processor() -> Result<&'static ChunkProcessor> {
                 }
             };
 
-            let processor = ChunkProcessor::new(config).await?;
-            info!("Audiopipe ChunkProcessor initialized successfully");
+            // Create storage adapter from screenpipe's db path
+            let db_path = dirs::home_dir()
+                .map(|h| h.join(".screenpipe").join("db.sqlite"))
+                .expect("home dir not found");
+            let storage = ScreenpipeStorage::new(
+                db_path.to_str().expect("invalid db path"),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create audiopipe storage: {}", e))?;
+
+            let processor = ChunkProcessor::with_storage(
+                config,
+                Arc::new(storage),
+            )
+            .await?;
+
+            info!("Audiopipe ChunkProcessor initialized with database storage");
             Ok(processor)
         })
         .await
@@ -328,6 +346,7 @@ pub async fn process_audio_input_with_audiopipe(
     audio: AudioInput,
     output_path: &PathBuf,
     output_sender: &crossbeam::channel::Sender<TranscriptionResult>,
+    db: Arc<DatabaseManager>,
 ) -> Result<()> {
     use crate::core::device::DeviceType;
 
@@ -367,7 +386,7 @@ pub async fn process_audio_input_with_audiopipe(
     }
 
     // Get or initialize audiopipe processor
-    let processor = match get_audiopipe_processor().await {
+    let processor = match get_audiopipe_processor(&db).await {
         Ok(p) => p,
         Err(e) => {
             error!("Failed to initialize audiopipe processor: {:?}", e);
@@ -544,6 +563,7 @@ pub async fn process_audio_input_with_audiopipe(
     _audio: AudioInput,
     _output_path: &PathBuf,
     _output_sender: &crossbeam::channel::Sender<TranscriptionResult>,
+    _db: Arc<screenpipe_db::DatabaseManager>,
 ) -> Result<()> {
     Err(anyhow::anyhow!(
         "Audiopipe processing requires the 'pro-audio' feature to be enabled"

@@ -485,7 +485,7 @@ dependencies = [
  "hf-hub",
  "hound",
  "indicatif",
- "knf-rs",
+ "knf-rs 0.2.4 (git+https://github.com/Neptune650/knf-rs.git?rev=b782e6bb02db495ce767f0094c0aa6bca5dba61c)",
  "lazy_static",
  "libc",
  "ndarray 0.16.1",
@@ -496,10 +496,12 @@ dependencies = [
  "realfft",
  "regex",
  "reqwest 0.12.12",
+ "screenpipe-db",
  "screenpipe-events",
  "serde",
  "serde_json",
  "shellexpand",
+ "sqlx",
  "statrs",
  "strsim 0.11.1",
  "symphonia",
@@ -3794,11 +3796,30 @@ dependencies = [
 [[package]]
 name = "knf-rs"
 version = "0.2.4"
+source = "git+https://github.com/Neptune650/knf-rs.git?rev=b782e6bb02db495ce767f0094c0aa6bca5dba61c#b782e6bb02db495ce767f0094c0aa6bca5dba61c"
+dependencies = [
+ "eyre",
+ "knf-rs-sys 0.2.4 (git+https://github.com/Neptune650/knf-rs.git?rev=b782e6bb02db495ce767f0094c0aa6bca5dba61c)",
+ "ndarray 0.16.1",
+]
+
+[[package]]
+name = "knf-rs"
+version = "0.2.4"
 source = "git+https://github.com/Neptune650/knf-rs.git#b782e6bb02db495ce767f0094c0aa6bca5dba61c"
 dependencies = [
  "eyre",
- "knf-rs-sys",
+ "knf-rs-sys 0.2.4 (git+https://github.com/Neptune650/knf-rs.git)",
  "ndarray 0.16.1",
+]
+
+[[package]]
+name = "knf-rs-sys"
+version = "0.2.4"
+source = "git+https://github.com/Neptune650/knf-rs.git?rev=b782e6bb02db495ce767f0094c0aa6bca5dba61c#b782e6bb02db495ce767f0094c0aa6bca5dba61c"
+dependencies = [
+ "bindgen 0.69.5",
+ "cmake",
 ]
 
 [[package]]
@@ -6385,7 +6406,7 @@ dependencies = [
  "hf-hub",
  "hound",
  "infer",
- "knf-rs",
+ "knf-rs 0.2.4 (git+https://github.com/Neptune650/knf-rs.git)",
  "lazy_static",
  "libsamplerate-sys",
  "log",

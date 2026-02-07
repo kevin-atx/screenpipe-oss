@@ -111,7 +111,7 @@ tracing-subscriber = "0.3.16"
 metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
 # Use audiopipe for audio processing (replaces OSS VAD/transcription)
-pro-audio = ["audiopipe", "audiopipe/metal"]
+pro-audio = ["audiopipe", "audiopipe/metal", "audiopipe/screenpipe-storage"]
 
 [[example]]
 name = "screenpipe-audio"
