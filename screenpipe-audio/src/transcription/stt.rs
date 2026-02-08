@@ -53,7 +53,7 @@ async fn get_audiopipe_processor(_db: &Arc<DatabaseManager>) -> Result<&'static 
             info!("Initializing audiopipe ChunkProcessor...");
 
             // Try loading config from ~/.screenpipe/audiopipe.toml, fall back to default
-            let config = {
+            let mut config = {
                 let config_path = dirs::home_dir()
                     .map(|h| h.join(".screenpipe").join("audiopipe.toml"))
                     .filter(|p| p.exists());
@@ -73,6 +73,24 @@ async fn get_audiopipe_processor(_db: &Arc<DatabaseManager>) -> Result<&'static 
                     AudiopipeConfig::default()
                 }
             };
+
+            // Override LLM settings from screenpipe's AI configuration (store.bin)
+            if let Some(data_dir) = dirs::data_dir() {
+                let store_path = data_dir.join("screenpipe").join("store.bin");
+                if let Ok(content) = std::fs::read_to_string(&store_path) {
+                    if let Ok(store) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(model) = store.get("aiModel").and_then(|v| v.as_str()) {
+                            info!("Using LLM model from screenpipe settings: {}", model);
+                            config.conversation.llm_model = model.to_string();
+                        }
+                        if let Some(url) = store.get("aiUrl").and_then(|v| v.as_str()) {
+                            // Strip /v1 suffix — audiopipe uses Ollama native API (/api/generate)
+                            let base_url = url.trim_end_matches("/v1").to_string();
+                            config.conversation.llm_base_url = base_url;
+                        }
+                    }
+                }
+            }
 
             // Create storage adapter from screenpipe's db path
             let db_path = dirs::home_dir()
